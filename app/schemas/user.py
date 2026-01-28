@@ -56,3 +56,32 @@ class TokenData(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "username": "testuser",
+                    "password": "testpass123"
+                }
+            ]
+        }
+    }
+
+
+class UserCreateExample(UserBase):
+    password: str
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "email": "test@example.com",
+                    "username": "testuser",
+                    "password": "testpass123",
+                    "full_name": "Test User",
+                    "phone": "555-1234"
+                }
+            ]
+        }
+    }
