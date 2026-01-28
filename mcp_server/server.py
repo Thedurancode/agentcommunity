@@ -614,6 +614,68 @@ async def list_users() -> str:
     return json.dumps(result, indent=2)
 
 
+# ============== GitHub Tools ==============
+
+@mcp.tool()
+async def list_github_repos() -> str:
+    """
+    List GitHub repositories for the authenticated user.
+
+    Returns:
+        List of GitHub repos with names and URLs
+    """
+    result = await api_request("GET", "/github/repos")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def link_github_repo(project_id: int, repo_full_name: str) -> str:
+    """
+    Link a GitHub repository to a project.
+
+    Args:
+        project_id: ID of the project to link
+        repo_full_name: Full name of the repo (e.g., 'owner/repo')
+
+    Returns:
+        Updated project with GitHub repo linked
+    """
+    result = await api_request("POST", f"/projects/{project_id}/link-repo", {
+        "repo_full_name": repo_full_name
+    })
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def sync_github_issues(project_id: int) -> str:
+    """
+    Sync issues from the linked GitHub repository to the project.
+
+    Args:
+        project_id: ID of the project with a linked GitHub repo
+
+    Returns:
+        Sync results with created/updated issues
+    """
+    result = await api_request("POST", f"/projects/{project_id}/sync-issues")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def sync_github_pull_requests(project_id: int) -> str:
+    """
+    Sync pull requests from the linked GitHub repository to the project.
+
+    Args:
+        project_id: ID of the project with a linked GitHub repo
+
+    Returns:
+        Sync results with created/updated pull requests
+    """
+    result = await api_request("POST", f"/projects/{project_id}/sync-pull-requests")
+    return json.dumps(result, indent=2)
+
+
 # ============== Run the server ==============
 
 if __name__ == "__main__":
