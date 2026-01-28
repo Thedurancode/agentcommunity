@@ -508,7 +508,12 @@ async def mark_notification_read(notification_id: int) -> str:
 async def create_blog(
     title: str,
     content: str,
-    summary: str = "",
+    excerpt: str = "",
+    status: str = "draft",
+    category: Optional[str] = None,
+    tags: Optional[str] = None,
+    cover_image: Optional[str] = None,
+    is_featured: bool = False,
     project_id: Optional[int] = None
 ) -> str:
     """
@@ -516,14 +521,31 @@ async def create_blog(
 
     Args:
         title: Title of the blog post
-        content: Full content of the blog
-        summary: Short summary/excerpt
+        content: Full content of the blog (markdown supported)
+        excerpt: Short summary/excerpt
+        status: Blog status - 'draft', 'published', or 'archived'
+        category: Blog category
+        tags: Comma-separated tags (e.g., "python,api,tutorial")
+        cover_image: URL for cover image
+        is_featured: Whether to feature this blog
         project_id: Optional project to associate with
 
     Returns:
         Created blog details
     """
-    data = {"title": title, "content": content, "summary": summary}
+    data = {
+        "title": title,
+        "content": content,
+        "excerpt": excerpt,
+        "status": status,
+        "is_featured": is_featured
+    }
+    if category:
+        data["category"] = category
+    if tags:
+        data["tags"] = tags
+    if cover_image:
+        data["cover_image"] = cover_image
     if project_id:
         data["project_id"] = project_id
 
@@ -532,17 +554,87 @@ async def create_blog(
 
 
 @mcp.tool()
-async def list_blogs(limit: int = 10) -> str:
+async def update_blog(
+    blog_id: int,
+    title: Optional[str] = None,
+    content: Optional[str] = None,
+    excerpt: Optional[str] = None,
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    tags: Optional[str] = None,
+    cover_image: Optional[str] = None,
+    is_featured: Optional[bool] = None
+) -> str:
+    """
+    Update an existing blog post.
+
+    Args:
+        blog_id: ID of the blog to update
+        title: New title
+        content: New content
+        excerpt: New excerpt
+        status: New status - 'draft', 'published', or 'archived'
+        category: New category
+        tags: New comma-separated tags
+        cover_image: New cover image URL
+        is_featured: Whether to feature this blog
+
+    Returns:
+        Updated blog details
+    """
+    data = {}
+    if title:
+        data["title"] = title
+    if content:
+        data["content"] = content
+    if excerpt:
+        data["excerpt"] = excerpt
+    if status:
+        data["status"] = status
+    if category:
+        data["category"] = category
+    if tags:
+        data["tags"] = tags
+    if cover_image:
+        data["cover_image"] = cover_image
+    if is_featured is not None:
+        data["is_featured"] = is_featured
+
+    result = await api_request("PATCH", f"/blogs/{blog_id}", data)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def publish_blog(blog_id: int) -> str:
+    """
+    Publish a draft blog post.
+
+    Args:
+        blog_id: ID of the blog to publish
+
+    Returns:
+        Updated blog with published status
+    """
+    result = await api_request("PATCH", f"/blogs/{blog_id}", {"status": "published"})
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def list_blogs(limit: int = 10, status: Optional[str] = None) -> str:
     """
     Get a list of blog posts.
 
     Args:
         limit: Maximum number of blogs to retrieve
+        status: Filter by status - 'draft', 'published', or 'archived'
 
     Returns:
         List of blog posts with author info
     """
-    result = await api_request("GET", "/blogs", params={"limit": limit})
+    params = {"limit": limit}
+    if status:
+        params["status"] = status
+    result = await api_request("GET", "/blogs", params=params)
     return json.dumps(result, indent=2)
 
 
@@ -555,9 +647,24 @@ async def get_blog(blog_id: int) -> str:
         blog_id: ID of the blog to retrieve
 
     Returns:
-        Full blog details
+        Full blog details including status, tags, and stats
     """
     result = await api_request("GET", f"/blogs/{blog_id}")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def delete_blog(blog_id: int) -> str:
+    """
+    Delete a blog post.
+
+    Args:
+        blog_id: ID of the blog to delete
+
+    Returns:
+        Confirmation of deletion
+    """
+    result = await api_request("DELETE", f"/blogs/{blog_id}")
     return json.dumps(result, indent=2)
 
 
