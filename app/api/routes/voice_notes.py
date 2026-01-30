@@ -19,9 +19,11 @@ from app.schemas.voice_note import (
     VoiceNoteUpdate,
     VoiceNoteWithTasks,
     ExtractedTask,
+    SentimentResponse,
 )
 from app.services.transcription import get_transcription_service
 from app.services.ai import get_ai_service
+from app.services.sentiment import get_sentiment_service
 
 router = APIRouter(prefix="/voice-notes", tags=["voice-notes"])
 
@@ -73,6 +75,23 @@ async def process_voice_note(voice_note_id: int, db_url: str):
                 voice_note.summary = organized.get("summary", "")
                 voice_note.organized_notes = organized.get("organized_notes", "")
                 voice_note.extracted_tasks = json.dumps(organized.get("extracted_tasks", []))
+
+            # Perform sentiment analysis
+            from app.services.sentiment import get_sentiment_service
+            sentiment_service = get_sentiment_service()
+            if sentiment_service.is_available() and transcript.strip():
+                try:
+                    sentiment_result = await sentiment_service.analyze_sentiment(
+                        transcript,
+                        context=f"voice note for project: {project_name}",
+                    )
+                    voice_note.sentiment = sentiment_result.sentiment
+                    voice_note.sentiment_confidence = sentiment_result.confidence
+                    voice_note.sentiment_emotions = json.dumps(sentiment_result.emotions)
+                    voice_note.sentiment_tone = sentiment_result.tone
+                    voice_note.sentiment_summary = sentiment_result.summary
+                except Exception:
+                    pass  # Sentiment analysis is optional
 
             # Mark as completed
             voice_note.transcription_status = TranscriptionStatus.COMPLETED
@@ -270,6 +289,63 @@ async def update_voice_note(
     await db.refresh(voice_note)
 
     return voice_note
+
+
+@router.post("/{voice_note_id}/analyze-sentiment", response_model=SentimentResponse)
+async def analyze_voice_note_sentiment(
+    voice_note_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Analyze sentiment for an existing voice note transcript.
+    Can be used to re-analyze sentiment or analyze notes processed before sentiment was added.
+    """
+    result = await db.execute(select(VoiceNote).where(VoiceNote.id == voice_note_id))
+    voice_note = result.scalar_one_or_none()
+
+    if not voice_note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Voice note not found",
+        )
+
+    if not voice_note.raw_transcript:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Voice note has no transcript to analyze",
+        )
+
+    sentiment_service = get_sentiment_service()
+    if not sentiment_service.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Sentiment analysis service not configured",
+        )
+
+    # Perform sentiment analysis
+    sentiment_result = await sentiment_service.analyze_sentiment(
+        voice_note.raw_transcript,
+        context="voice note transcript",
+    )
+
+    # Store results
+    voice_note.sentiment = sentiment_result.sentiment
+    voice_note.sentiment_confidence = sentiment_result.confidence
+    voice_note.sentiment_emotions = json.dumps(sentiment_result.emotions)
+    voice_note.sentiment_tone = sentiment_result.tone
+    voice_note.sentiment_summary = sentiment_result.summary
+
+    await db.commit()
+    await db.refresh(voice_note)
+
+    return SentimentResponse(
+        sentiment=sentiment_result.sentiment,
+        confidence=sentiment_result.confidence,
+        emotions=sentiment_result.emotions,
+        tone=sentiment_result.tone,
+        summary=sentiment_result.summary,
+    )
 
 
 @router.delete("/{voice_note_id}", status_code=status.HTTP_204_NO_CONTENT)

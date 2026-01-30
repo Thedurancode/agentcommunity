@@ -42,6 +42,13 @@ class VoiceNote(Base):
     extracted_tasks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of tasks
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Sentiment analysis
+    sentiment: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # positive, negative, neutral, mixed
+    sentiment_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sentiment_emotions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of emotions
+    sentiment_tone: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    sentiment_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Processing info
     processing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

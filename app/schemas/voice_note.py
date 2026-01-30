@@ -23,6 +23,15 @@ class VoiceNoteUpdate(BaseModel):
     title: Optional[str] = None
 
 
+class SentimentResponse(BaseModel):
+    """Sentiment analysis response."""
+    sentiment: Optional[str] = None  # positive, negative, neutral, mixed
+    confidence: Optional[float] = None
+    emotions: Optional[List[str]] = None
+    tone: Optional[str] = None
+    summary: Optional[str] = None
+
+
 class VoiceNoteResponse(VoiceNoteBase):
     id: int
     audio_url: str
@@ -34,6 +43,12 @@ class VoiceNoteResponse(VoiceNoteBase):
     organized_notes: Optional[str] = None
     extracted_tasks: Optional[str] = None  # JSON string
     summary: Optional[str] = None
+    # Sentiment fields
+    sentiment: Optional[str] = None
+    sentiment_confidence: Optional[float] = None
+    sentiment_emotions: Optional[str] = None  # JSON string
+    sentiment_tone: Optional[str] = None
+    sentiment_summary: Optional[str] = None
     processing_error: Optional[str] = None
     processed_at: Optional[datetime] = None
     project_id: int
