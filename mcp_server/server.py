@@ -14,19 +14,28 @@ import json
 import httpx
 from typing import Optional, Any
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import TransportSecuritySettings
 
-# Initialize MCP server
-mcp = FastMCP("community-api")
+# Initialize MCP server with transport security settings for cloud deployment
+transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=False,  # Disable for cloud deployment
+    allowed_hosts=["*"],
+    allowed_origins=["*"],
+)
+mcp = FastMCP("community-api", transport_security=transport_security)
 
 # Configuration
 API_BASE_URL = os.getenv("COMMUNITY_API_URL", "http://127.0.0.1:8000/api/v1")
-API_TOKEN = os.getenv("COMMUNITY_API_TOKEN", "")
+API_TOKEN = os.getenv("COMMUNITY_API_TOKEN", "")  # JWT token
+API_KEY = os.getenv("COMMUNITY_API_KEY", "")  # API key (starts with clak_)
 
 
 def get_headers() -> dict:
-    """Get headers for API requests."""
+    """Get headers for API requests. Prefers API key over JWT token."""
     headers = {"Content-Type": "application/json"}
-    if API_TOKEN:
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+    elif API_TOKEN:
         headers["Authorization"] = f"Bearer {API_TOKEN}"
     return headers
 
@@ -736,6 +745,48 @@ async def list_github_repos() -> str:
 
 
 @mcp.tool()
+async def create_github_repo(
+    name: str,
+    description: str = "",
+    private: bool = False,
+    auto_init: bool = True,
+    gitignore_template: Optional[str] = None,
+    license_template: Optional[str] = None,
+    project_id: Optional[int] = None
+) -> str:
+    """
+    Create a new GitHub repository.
+
+    Args:
+        name: Name for the new repository
+        description: Optional description of the repository
+        private: Whether the repo should be private (default: False)
+        auto_init: Initialize with a README (default: True)
+        gitignore_template: Optional gitignore template (e.g., 'Python', 'Node', 'Go')
+        license_template: Optional license template (e.g., 'mit', 'apache-2.0', 'gpl-3.0')
+        project_id: Optional project ID to link the new repo to
+
+    Returns:
+        Created repository details
+    """
+    data = {
+        "name": name,
+        "description": description,
+        "private": private,
+        "auto_init": auto_init,
+    }
+    if gitignore_template:
+        data["gitignore_template"] = gitignore_template
+    if license_template:
+        data["license_template"] = license_template
+    if project_id:
+        data["project_id"] = project_id
+
+    result = await api_request("POST", "/github/repos", data)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
 async def link_github_repo(project_id: int, repo_full_name: str) -> str:
     """
     Link a GitHub repository to a project.
@@ -783,7 +834,121 @@ async def sync_github_pull_requests(project_id: int) -> str:
     return json.dumps(result, indent=2)
 
 
+# ============== API Key Tools ==============
+
+@mcp.tool()
+async def create_api_key(name: str) -> str:
+    """
+    Create a new API key for programmatic access.
+
+    The full key is only shown once - save it securely!
+    Keys provide full access as the authenticated user.
+
+    Args:
+        name: A friendly name to identify this API key
+
+    Returns:
+        Created API key details including the full key (save this!)
+    """
+    result = await api_request("POST", "/api-keys", {"name": name})
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def list_api_keys() -> str:
+    """
+    List all API keys for the current user.
+
+    Note: Full keys are not shown, only prefixes for identification.
+
+    Returns:
+        List of API keys with names, prefixes, and last used times
+    """
+    result = await api_request("GET", "/api-keys")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def revoke_api_key(key_id: int) -> str:
+    """
+    Revoke an API key (deactivate without deleting).
+
+    The key will no longer work for authentication.
+
+    Args:
+        key_id: ID of the API key to revoke
+
+    Returns:
+        Updated API key details showing inactive status
+    """
+    result = await api_request("PATCH", f"/api-keys/{key_id}/revoke")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def delete_api_key(key_id: int) -> str:
+    """
+    Permanently delete an API key.
+
+    Args:
+        key_id: ID of the API key to delete
+
+    Returns:
+        Confirmation of deletion
+    """
+    result = await api_request("DELETE", f"/api-keys/{key_id}")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def set_api_key(api_key: str) -> str:
+    """
+    Set the API key for subsequent requests in this session.
+
+    This allows you to authenticate using an API key instead of
+    username/password login. The key should start with 'clak_'.
+
+    Args:
+        api_key: The full API key (e.g., clak_abc123...)
+
+    Returns:
+        Confirmation that the API key has been set
+    """
+    global API_KEY
+    if not api_key.startswith("clak_"):
+        return "Error: API key should start with 'clak_'"
+    API_KEY = api_key
+    return "API key set successfully for this session."
+
+
 # ============== Run the server ==============
 
 if __name__ == "__main__":
-    mcp.run()
+    import sys
+
+    # Check for SSE mode (for ElevenLabs, web clients, etc.)
+    if os.getenv("MCP_TRANSPORT", "stdio") == "sse":
+        import uvicorn
+        from starlette.applications import Starlette
+        from starlette.routing import Mount
+        from starlette.middleware import Middleware
+        from starlette.middleware.trustedhost import TrustedHostMiddleware
+        from starlette.middleware.cors import CORSMiddleware
+
+        port = int(os.getenv("PORT", "8080"))
+        # Allow all hosts and CORS for cloud deployment (ElevenLabs, etc.)
+        middleware = [
+            Middleware(TrustedHostMiddleware, allowed_hosts=["*"]),
+            Middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["*"],
+                allow_headers=["*"],
+                expose_headers=["Mcp-Session-Id"],
+            ),
+        ]
+        app = Starlette(routes=[Mount('/', app=mcp.sse_app())], middleware=middleware)
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    else:
+        # Default stdio mode for Claude Desktop
+        mcp.run()
