@@ -3,7 +3,35 @@ from typing import Optional, List
 
 from pydantic import BaseModel
 
+from app.models.note import TranscriptStatus
 from app.schemas.user import UserResponse
+
+
+# Note Audio Transcript Schemas
+class NoteAudioTranscriptResponse(BaseModel):
+    """Response for note audio transcript."""
+    id: int
+    note_id: int
+    title: Optional[str] = None
+    audio_url: str
+    audio_filename: str
+    duration_seconds: Optional[float] = None
+    file_size_bytes: Optional[int] = None
+    status: TranscriptStatus
+    transcript: Optional[str] = None
+    processing_error: Optional[str] = None
+    display_order: int
+    created_at: datetime
+    processed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class NoteAudioTranscriptList(BaseModel):
+    """List of audio transcripts."""
+    transcripts: List[NoteAudioTranscriptResponse]
+    total: int
 
 
 class NoteBase(BaseModel):
@@ -33,6 +61,11 @@ class NoteResponse(NoteBase):
 
 class NoteWithCreator(NoteResponse):
     created_by: Optional[UserResponse] = None
+
+
+class NoteWithDetails(NoteWithCreator):
+    """Note with all details including audio transcripts."""
+    audio_transcripts: List[NoteAudioTranscriptResponse] = []
 
 
 class NoteList(BaseModel):

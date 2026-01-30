@@ -3,8 +3,35 @@ from typing import Optional, List
 
 from pydantic import BaseModel, EmailStr
 
-from app.models.blog import BlogStatus
+from app.models.blog import BlogStatus, TranscriptStatus
 from app.schemas.user import UserResponse
+
+
+# Blog Audio Transcript Schemas
+class BlogAudioTranscriptResponse(BaseModel):
+    """Response for blog audio transcript."""
+    id: int
+    blog_id: int
+    title: Optional[str] = None
+    audio_url: str
+    audio_filename: str
+    duration_seconds: Optional[float] = None
+    file_size_bytes: Optional[int] = None
+    status: TranscriptStatus
+    transcript: Optional[str] = None
+    processing_error: Optional[str] = None
+    display_order: int
+    created_at: datetime
+    processed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BlogAudioTranscriptList(BaseModel):
+    """List of audio transcripts."""
+    transcripts: List[BlogAudioTranscriptResponse]
+    total: int
 
 
 # Blog Image Schemas
@@ -157,6 +184,7 @@ class BlogWithAuthor(BlogResponse):
 
 class BlogWithDetails(BlogWithAuthor):
     images: List[BlogImageResponse] = []
+    audio_transcripts: List[BlogAudioTranscriptResponse] = []
     comments_count: int = 0
 
 

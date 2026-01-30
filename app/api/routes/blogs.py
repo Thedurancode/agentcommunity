@@ -2,15 +2,16 @@ import json
 import re
 from typing import Optional, List
 from datetime import datetime
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.models.user import User
-from app.models.blog import Blog, BlogStatus, BlogComment, BlogImage
+from app.models.blog import Blog, BlogStatus, BlogComment, BlogImage, BlogAudioTranscript, TranscriptStatus
 from app.schemas.blog import (
     BlogCreate,
     BlogUpdate,
@@ -30,8 +31,11 @@ from app.schemas.blog import (
     BlogCommentAuthor,
     BlogImageCreate,
     BlogImageResponse,
+    BlogAudioTranscriptResponse,
+    BlogAudioTranscriptList,
 )
 from app.api.deps import get_current_user
+from app.services.transcription import get_transcription_service
 
 
 router = APIRouter(prefix="/blogs", tags=["blogs"])
@@ -253,6 +257,7 @@ async def get_blog(
         query.options(
             selectinload(Blog.author),
             selectinload(Blog.images),
+            selectinload(Blog.audio_transcripts),
         )
     )
     blog = result.scalar_one_or_none()
@@ -655,3 +660,333 @@ async def like_blog(
     await db.commit()
 
     return {"likes_count": blog.likes_count}
+
+
+# ============== BLOG AUDIO TRANSCRIPTS ==============
+
+# Allowed audio formats
+ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".mp4", ".m4a", ".wav", ".webm", ".ogg", ".flac"}
+MAX_AUDIO_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+
+
+async def process_blog_audio_transcript(transcript_id: int, db_url: str):
+    """Background task to transcribe audio and update the transcript record."""
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from sqlalchemy import select
+
+    engine = create_async_engine(db_url)
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with async_session() as db:
+        # Get transcript record
+        result = await db.execute(
+            select(BlogAudioTranscript).where(BlogAudioTranscript.id == transcript_id)
+        )
+        transcript_record = result.scalar_one_or_none()
+        if not transcript_record:
+            return
+
+        try:
+            # Update status to processing
+            transcript_record.status = TranscriptStatus.PROCESSING
+            await db.commit()
+
+            # Get file path from URL (assumes local storage)
+            file_path = transcript_record.audio_url.replace("/uploads/", "uploads/")
+
+            # Transcribe
+            transcription_service = get_transcription_service()
+            if not transcription_service.is_available():
+                raise ValueError("Transcription service not configured")
+
+            transcript_text = await transcription_service.transcribe_file(file_path)
+            transcript_record.transcript = transcript_text
+
+            # Mark as completed
+            transcript_record.status = TranscriptStatus.COMPLETED
+            transcript_record.processed_at = datetime.utcnow()
+
+        except Exception as e:
+            transcript_record.status = TranscriptStatus.FAILED
+            transcript_record.processing_error = str(e)
+
+        await db.commit()
+
+    await engine.dispose()
+
+
+@router.post("/{blog_id}/audio", response_model=BlogAudioTranscriptResponse, status_code=status.HTTP_201_CREATED)
+async def upload_blog_audio(
+    blog_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upload an audio file for a blog post.
+    The audio will be automatically transcribed in the background.
+    You can upload multiple audio files per blog.
+
+    Supports: mp3, mp4, m4a, wav, webm, ogg, flac (up to 100MB)
+    """
+    # Verify blog exists and user has access
+    result = await db.execute(select(Blog).where(Blog.id == blog_id))
+    blog = result.scalar_one_or_none()
+
+    if not blog:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blog not found",
+        )
+
+    # Check ownership
+    if blog.author_id != current_user.id and current_user.role.value != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to add audio to this blog",
+        )
+
+    # Validate file extension
+    file_ext = Path(file.filename).suffix.lower() if file.filename else ""
+    if file_ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_AUDIO_EXTENSIONS)}",
+        )
+
+    # Read and check file size
+    content = await file.read()
+    if len(content) > MAX_AUDIO_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File too large. Max size: {MAX_AUDIO_FILE_SIZE / 1024 / 1024:.0f}MB",
+        )
+
+    # Save file
+    upload_dir = Path("uploads/blog_audio")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{blog_id}_{file.filename}"
+    file_path = upload_dir / filename
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Get current max display_order
+    order_result = await db.execute(
+        select(func.max(BlogAudioTranscript.display_order)).where(
+            BlogAudioTranscript.blog_id == blog_id
+        )
+    )
+    max_order = order_result.scalar() or 0
+
+    # Create transcript record
+    transcript_record = BlogAudioTranscript(
+        blog_id=blog_id,
+        title=title,
+        audio_url=f"/uploads/blog_audio/{filename}",
+        audio_filename=file.filename or filename,
+        file_size_bytes=len(content),
+        status=TranscriptStatus.PENDING,
+        display_order=max_order + 1,
+    )
+    db.add(transcript_record)
+    await db.commit()
+    await db.refresh(transcript_record)
+
+    # Start background transcription
+    from app.core.config import settings
+    background_tasks.add_task(process_blog_audio_transcript, transcript_record.id, settings.DATABASE_URL)
+
+    return transcript_record
+
+
+@router.get("/{blog_id}/audio", response_model=BlogAudioTranscriptList)
+async def list_blog_audio_transcripts(
+    blog_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all audio transcripts for a blog post."""
+    # Verify blog exists
+    result = await db.execute(select(Blog).where(Blog.id == blog_id))
+    blog = result.scalar_one_or_none()
+
+    if not blog:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blog not found",
+        )
+
+    # Get transcripts
+    transcripts_result = await db.execute(
+        select(BlogAudioTranscript)
+        .where(BlogAudioTranscript.blog_id == blog_id)
+        .order_by(BlogAudioTranscript.display_order)
+    )
+    transcripts = transcripts_result.scalars().all()
+
+    return BlogAudioTranscriptList(
+        transcripts=[BlogAudioTranscriptResponse.model_validate(t) for t in transcripts],
+        total=len(transcripts),
+    )
+
+
+@router.get("/{blog_id}/audio/{transcript_id}", response_model=BlogAudioTranscriptResponse)
+async def get_blog_audio_transcript(
+    blog_id: int,
+    transcript_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific audio transcript."""
+    result = await db.execute(
+        select(BlogAudioTranscript).where(
+            BlogAudioTranscript.id == transcript_id,
+            BlogAudioTranscript.blog_id == blog_id,
+        )
+    )
+    transcript = result.scalar_one_or_none()
+
+    if not transcript:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Audio transcript not found",
+        )
+
+    return transcript
+
+
+@router.post("/{blog_id}/audio/{transcript_id}/reprocess", response_model=BlogAudioTranscriptResponse)
+async def reprocess_blog_audio(
+    blog_id: int,
+    transcript_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-process transcription for an audio file."""
+    # Verify blog and ownership
+    blog_result = await db.execute(select(Blog).where(Blog.id == blog_id))
+    blog = blog_result.scalar_one_or_none()
+
+    if not blog:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
+
+    if blog.author_id != current_user.id and current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    # Get transcript
+    result = await db.execute(
+        select(BlogAudioTranscript).where(
+            BlogAudioTranscript.id == transcript_id,
+            BlogAudioTranscript.blog_id == blog_id,
+        )
+    )
+    transcript = result.scalar_one_or_none()
+
+    if not transcript:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio transcript not found")
+
+    # Reset status
+    transcript.status = TranscriptStatus.PENDING
+    transcript.processing_error = None
+    transcript.transcript = None
+    await db.commit()
+    await db.refresh(transcript)
+
+    # Start background transcription
+    from app.core.config import settings
+    background_tasks.add_task(process_blog_audio_transcript, transcript.id, settings.DATABASE_URL)
+
+    return transcript
+
+
+@router.delete("/{blog_id}/audio/{transcript_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_blog_audio(
+    blog_id: int,
+    transcript_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete an audio transcript and its file."""
+    import os
+
+    # Verify blog and ownership
+    blog_result = await db.execute(select(Blog).where(Blog.id == blog_id))
+    blog = blog_result.scalar_one_or_none()
+
+    if not blog:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
+
+    if blog.author_id != current_user.id and current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    # Get transcript
+    result = await db.execute(
+        select(BlogAudioTranscript).where(
+            BlogAudioTranscript.id == transcript_id,
+            BlogAudioTranscript.blog_id == blog_id,
+        )
+    )
+    transcript = result.scalar_one_or_none()
+
+    if not transcript:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio transcript not found")
+
+    # Delete audio file
+    file_path = transcript.audio_url.replace("/uploads/", "uploads/")
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+    await db.delete(transcript)
+    await db.commit()
+    return None
+
+
+@router.get("/{blog_id}/combined-transcript")
+async def get_combined_transcript(
+    blog_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get all completed transcripts combined into a single text.
+    Useful for including in blog content or generating summaries.
+    """
+    # Verify blog exists
+    result = await db.execute(select(Blog).where(Blog.id == blog_id))
+    blog = result.scalar_one_or_none()
+
+    if not blog:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blog not found",
+        )
+
+    # Get completed transcripts
+    transcripts_result = await db.execute(
+        select(BlogAudioTranscript)
+        .where(
+            BlogAudioTranscript.blog_id == blog_id,
+            BlogAudioTranscript.status == TranscriptStatus.COMPLETED,
+        )
+        .order_by(BlogAudioTranscript.display_order)
+    )
+    transcripts = transcripts_result.scalars().all()
+
+    # Combine transcripts
+    combined_parts = []
+    for t in transcripts:
+        if t.transcript:
+            header = f"## {t.title}" if t.title else f"## Audio Note {t.display_order}"
+            combined_parts.append(f"{header}\n\n{t.transcript}")
+
+    combined_text = "\n\n---\n\n".join(combined_parts) if combined_parts else ""
+
+    return {
+        "blog_id": blog_id,
+        "transcript_count": len(transcripts),
+        "combined_transcript": combined_text,
+    }

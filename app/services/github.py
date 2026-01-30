@@ -55,6 +55,43 @@ class GitHubService:
             params={"per_page": per_page, "page": page, "sort": sort}
         )
 
+    async def create_repository(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        private: bool = False,
+        auto_init: bool = True,
+        gitignore_template: Optional[str] = None,
+        license_template: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new GitHub repository for the authenticated user.
+
+        Args:
+            name: Repository name
+            description: Repository description
+            private: Whether the repo should be private
+            auto_init: Initialize with a README
+            gitignore_template: Optional gitignore template (e.g., 'Python', 'Node')
+            license_template: Optional license template (e.g., 'mit', 'apache-2.0')
+
+        Returns:
+            Created repository details
+        """
+        data = {
+            "name": name,
+            "private": private,
+            "auto_init": auto_init,
+        }
+        if description:
+            data["description"] = description
+        if gitignore_template:
+            data["gitignore_template"] = gitignore_template
+        if license_template:
+            data["license_template"] = license_template
+
+        return await self._request("POST", "/user/repos", json=data)
+
     async def list_issues(
         self,
         owner: str,

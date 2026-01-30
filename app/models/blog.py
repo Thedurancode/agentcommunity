@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List, TYPE_CHECKING
 
-from sqlalchemy import String, DateTime, Integer, ForeignKey, Text, Boolean, Enum as SQLEnum
+from sqlalchemy import String, DateTime, Integer, ForeignKey, Text, Boolean, Enum as SQLEnum, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -70,6 +70,9 @@ class Blog(Base):
     images: Mapped[List["BlogImage"]] = relationship(
         "BlogImage", back_populates="blog", cascade="all, delete-orphan"
     )
+    audio_transcripts: Mapped[List["BlogAudioTranscript"]] = relationship(
+        "BlogAudioTranscript", back_populates="blog", cascade="all, delete-orphan"
+    )
 
 
 class BlogImage(Base):
@@ -88,6 +91,46 @@ class BlogImage(Base):
 
     # Relationships
     blog: Mapped["Blog"] = relationship("Blog", back_populates="images")
+
+
+class TranscriptStatus(str, Enum):
+    """Audio transcript processing status."""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class BlogAudioTranscript(Base):
+    """Audio transcripts for blog posts - supports multiple audio notes."""
+    __tablename__ = "blog_audio_transcripts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    blog_id: Mapped[int] = mapped_column(Integer, ForeignKey("blogs.id"))
+
+    # Audio file info
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Optional title for the audio
+    audio_url: Mapped[str] = mapped_column(String(500))
+    audio_filename: Mapped[str] = mapped_column(String(255))
+    duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Transcription
+    status: Mapped[TranscriptStatus] = mapped_column(
+        SQLEnum(TranscriptStatus), default=TranscriptStatus.PENDING
+    )
+    transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # The transcribed text
+    processing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Ordering
+    display_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    blog: Mapped["Blog"] = relationship("Blog", back_populates="audio_transcripts")
 
 
 class BlogComment(Base):

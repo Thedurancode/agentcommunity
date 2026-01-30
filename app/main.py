@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import init_db
-from app.api.routes import auth, projects, team_members, issues, pull_requests, github, brands, notes, recap, videos, classes, support_tickets, feed, episodes, voice_notes, developers, blogs, notifications, messages, properties, webhooks, api_keys, voice_streaming, sentiment
+from app.api.routes import auth, projects, team_members, issues, pull_requests, github, brands, notes, recap, videos, classes, support_tickets, feed, episodes, voice_notes, developers, blogs, notifications, messages, properties, webhooks, api_keys, voice_streaming, sentiment, memory, agent
 
 
 @asynccontextmanager
@@ -62,6 +62,8 @@ app.include_router(webhooks.router, prefix=settings.API_V1_PREFIX)
 app.include_router(api_keys.router, prefix=settings.API_V1_PREFIX)
 app.include_router(voice_streaming.router, prefix=settings.API_V1_PREFIX)
 app.include_router(sentiment.router, prefix=settings.API_V1_PREFIX)
+app.include_router(memory.router, prefix=settings.API_V1_PREFIX)
+app.include_router(agent.router, prefix=settings.API_V1_PREFIX)
 
 # Serve uploaded files
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

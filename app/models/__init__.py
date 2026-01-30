@@ -24,6 +24,8 @@ from app.models.notification import Notification, NotificationPreference, Notifi
 from app.models.message import Conversation, ConversationParticipant, DirectMessage, ConversationType, MessageStatus
 from app.models.property import Property, PropertyContact, PropertyContract, PropertyPhase, PropertyNote, PropertyPhoneCall, PropertySMS, PropertyEnrichment, PropertyStatus, ContactType, ContractStatus, ContractType, PhaseStatus, CallStatus, SMSStatus, SMSDirection
 from app.models.api_key import APIKey
+from app.models.agent_memory import AgentMemory, AgentConversation, ContactPreference, MemoryType, MemorySourceType, MemoryStatus
+from app.models.agent_task import AgentTask, AgentTaskStep, TaskStatus, TaskType
 
 __all__ = [
     # User
@@ -65,4 +67,9 @@ __all__ = [
     "PropertyStatus", "ContactType", "ContractStatus", "ContractType", "PhaseStatus", "CallStatus", "SMSStatus", "SMSDirection",
     # API Keys
     "APIKey",
+    # Agent Memory
+    "AgentMemory", "AgentConversation", "ContactPreference",
+    "MemoryType", "MemorySourceType", "MemoryStatus",
+    # Agent Tasks
+    "AgentTask", "AgentTaskStep", "TaskStatus", "TaskType",
 ]

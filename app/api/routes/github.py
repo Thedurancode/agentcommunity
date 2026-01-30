@@ -1,6 +1,7 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -18,6 +19,16 @@ from app.services.github import get_github_service
 router = APIRouter(prefix="/github", tags=["github"])
 
 
+class CreateRepoRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    private: bool = False
+    auto_init: bool = True
+    gitignore_template: Optional[str] = None
+    license_template: Optional[str] = None
+    project_id: Optional[int] = None  # Optional: link to existing project
+
+
 @router.get("/repos")
 async def list_github_repos(
     current_user: User = Depends(get_current_user),
@@ -31,6 +42,75 @@ async def list_github_repos(
 
     github = get_github_service(current_user.github_access_token)
     return await github.list_user_repos()
+
+
+@router.post("/repos")
+async def create_github_repo(
+    repo_data: CreateRepoRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create a new GitHub repository.
+
+    Optionally link it to an existing project by providing project_id.
+    """
+    if not current_user.github_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub account not connected. Please connect your GitHub account first.",
+        )
+
+    github = get_github_service(current_user.github_access_token)
+
+    # Create the repo on GitHub
+    try:
+        repo_info = await github.create_repository(
+            name=repo_data.name,
+            description=repo_data.description,
+            private=repo_data.private,
+            auto_init=repo_data.auto_init,
+            gitignore_template=repo_data.gitignore_template,
+            license_template=repo_data.license_template,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create GitHub repository: {str(e)}",
+        )
+
+    result = {
+        "message": "Repository created successfully",
+        "repo": {
+            "id": repo_info["id"],
+            "name": repo_info["name"],
+            "full_name": repo_info["full_name"],
+            "url": repo_info["html_url"],
+            "private": repo_info["private"],
+        }
+    }
+
+    # If project_id provided, link the repo to the project
+    if repo_data.project_id:
+        project = await check_project_access(
+            repo_data.project_id,
+            current_user,
+            db,
+            required_roles=[TeamRole.OWNER, TeamRole.MAINTAINER]
+        )
+
+        project.github_repo_id = repo_info["id"]
+        project.github_repo_name = repo_info["name"]
+        project.github_repo_full_name = repo_info["full_name"]
+        project.github_repo_url = repo_info["html_url"]
+
+        await db.commit()
+        await db.refresh(project)
+
+        result["project_linked"] = True
+        result["project_id"] = project.id
+
+    return result
 
 
 @router.post("/projects/{project_id}/sync-issues")
