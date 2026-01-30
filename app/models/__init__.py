@@ -22,6 +22,8 @@ from app.models.developer_profile import DeveloperProfile, DeveloperFollow, Deve
 from app.models.blog import Blog, BlogImage, BlogComment, BlogStatus
 from app.models.notification import Notification, NotificationPreference, NotificationType, NotificationPriority
 from app.models.message import Conversation, ConversationParticipant, DirectMessage, ConversationType, MessageStatus
+from app.models.property import Property, PropertyContact, PropertyContract, PropertyPhase, PropertyNote, PropertyPhoneCall, PropertySMS, PropertyEnrichment, PropertyStatus, ContactType, ContractStatus, ContractType, PhaseStatus, CallStatus, SMSStatus, SMSDirection
+from app.models.api_key import APIKey
 
 __all__ = [
     # User
@@ -58,4 +60,9 @@ __all__ = [
     "Notification", "NotificationPreference", "NotificationType", "NotificationPriority",
     # Messages
     "Conversation", "ConversationParticipant", "DirectMessage", "ConversationType", "MessageStatus",
+    # Properties
+    "Property", "PropertyContact", "PropertyContract", "PropertyPhase", "PropertyNote", "PropertyPhoneCall", "PropertySMS",
+    "PropertyStatus", "ContactType", "ContractStatus", "ContractType", "PhaseStatus", "CallStatus", "SMSStatus", "SMSDirection",
+    # API Keys
+    "APIKey",
 ]

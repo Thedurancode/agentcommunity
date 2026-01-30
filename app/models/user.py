@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from app.models.developer_profile import DeveloperProfile
     from app.models.blog import Blog
     from app.models.notification import Notification, NotificationPreference
+    from app.models.property import Property
+    from app.models.api_key import APIKey
 
 
 class UserRole(str, Enum):
@@ -56,3 +58,5 @@ class User(Base):
     notification_preferences: Mapped[Optional["NotificationPreference"]] = relationship(
         "NotificationPreference", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    properties: Mapped[List["Property"]] = relationship("Property", back_populates="owner", cascade="all, delete-orphan")
+    api_keys: Mapped[List["APIKey"]] = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")

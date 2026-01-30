@@ -1,5 +1,6 @@
+import secrets
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -8,6 +9,7 @@ from app.core.config import settings
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -35,3 +37,22 @@ def decode_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def generate_api_key() -> Tuple[str, str, str]:
+    """Generate a new API key.
+
+    Returns:
+        Tuple of (full_key, key_prefix, key_hash)
+    """
+    # Generate 32 random bytes = 64 hex chars
+    random_part = secrets.token_hex(32)
+    full_key = f"clak_{random_part}"
+    key_prefix = full_key[:12]  # "clak_" + first 7 chars of random
+    key_hash = api_key_context.hash(full_key)
+    return full_key, key_prefix, key_hash
+
+
+def verify_api_key(plain_key: str, hashed_key: str) -> bool:
+    """Verify an API key against its hash."""
+    return api_key_context.verify(plain_key, hashed_key)
